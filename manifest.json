@@ -2,7 +2,7 @@
   "name": "修仙游戏 - 吐纳修炼",
   "short_name": "修仙游戏",
   "description": "2D修仙游戏，体验吐纳修炼的乐趣",
-  "start_url": "xiuxian-game.html",
+  "start_url": "./",
   "display": "standalone",
   "background_color": "#0a0a2a",
   "theme_color": "#1a1a4a",
