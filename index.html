@@ -1,0 +1,788 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>2D修仙游戏 - 吐纳修炼</title>
+    
+    <!-- PWA 支持 -->
+    <link rel="manifest" href="./manifest.json">
+    <meta name="theme-color" content="#0a0a2a">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="修仙游戏">
+    <link rel="apple-touch-icon" href="./icon-192.png">
+    <meta name="msapplication-TileImage" content="./icon-192.png">
+    <meta name="msapplication-TileColor" content="#0a0a2a">
+    
+    <script>
+        // 注册 Service Worker
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js')
+                    .then(registration => {
+                        console.log('Service Worker 注册成功:', registration);
+                    })
+                    .catch(error => {
+                        console.log('Service Worker 注册失败:', error);
+                    });
+            });
+        }
+        
+        // 阻止双击缩放 (iOS)
+        let lastTouchEnd = 0;
+        document.addEventListener('touchend', function(event) {
+            const now = (new Date()).getTime();
+            if (now - lastTouchEnd <= 300) {
+                event.preventDefault();
+            }
+            lastTouchEnd = now;
+        }, false);
+    </script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: linear-gradient(to bottom, #0a0a2e 0%, #1a1a4e 50%, #0a0a2e 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: 'Microsoft YaHei', sans-serif;
+            overflow: hidden;
+            touch-action: none;
+        }
+
+        #gameContainer {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        #gameCanvas {
+            z-index: 1;
+        }
+
+        #particleCanvas {
+            z-index: 2;
+            pointer-events: none;
+        }
+
+        .ui-overlay {
+            position: absolute;
+            z-index: 3;
+            color: #fff;
+            text-shadow: 0 0 10px rgba(0, 255, 255, 0.8);
+        }
+
+        #cultivationInfo {
+            top: 20px;
+            left: 20px;
+            font-size: 16px;
+        }
+
+        #cultivationInfo h2 {
+            color: #00ffff;
+            margin-bottom: 10px;
+            font-size: 20px;
+        }
+
+        .stat {
+            margin: 5px 0;
+            font-size: 14px;
+        }
+
+        .stat-label {
+            color: #88ccff;
+        }
+
+        .stat-value {
+            color: #ffff00;
+            font-weight: bold;
+        }
+
+        #tuNaButton {
+            position: absolute;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 4;
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            background: radial-gradient(circle, #00ffff 0%, #0088aa 100%);
+            border: 3px solid #00ffff;
+            color: #fff;
+            font-size: 20px;
+            font-weight: bold;
+            cursor: pointer;
+            box-shadow: 0 0 20px rgba(0, 255, 255, 0.6);
+            transition: all 0.3s;
+            text-shadow: 0 0 10px rgba(255, 255, 255, 0.8);
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        #tuNaButton:hover {
+            transform: translateX(-50%) scale(1.1);
+            box-shadow: 0 0 40px rgba(0, 255, 255, 0.9);
+        }
+
+        #tuNaButton:active {
+            transform: translateX(-50%) scale(0.95);
+        }
+
+        #tuNaButton.cultivating {
+            background: radial-gradient(circle, #ff00ff 0%, #880088 100%);
+            border-color: #ff00ff;
+            box-shadow: 0 0 40px rgba(255, 0, 255, 0.8);
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: translateX(-50%) scale(1); }
+            50% { transform: translateX(-50%) scale(1.05); }
+        }
+
+        #messageLog {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            z-index: 3;
+            width: 200px;
+            max-height: 150px;
+            overflow-y: auto;
+            background: rgba(0, 0, 0, 0.6);
+            border: 1px solid rgba(0, 255, 255, 0.3);
+            border-radius: 10px;
+            padding: 10px;
+            font-size: 12px;
+        }
+
+        .message {
+            margin: 5px 0;
+            padding: 5px;
+            border-radius: 5px;
+            animation: fadeIn 0.5s;
+        }
+
+        .message.success {
+            color: #00ff00;
+            background: rgba(0, 255, 0, 0.1);
+        }
+
+        .message.info {
+            color: #00ffff;
+            background: rgba(0, 255, 255, 0.1);
+        }
+
+        .message.breakthrough {
+            color: #ff00ff;
+            background: rgba(255, 0, 255, 0.2);
+            font-weight: bold;
+            animation: glow 1s infinite;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateX(20px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        @keyframes glow {
+            0%, 100% { text-shadow: 0 0 10px rgba(255, 0, 255, 0.8); }
+            50% { text-shadow: 0 0 20px rgba(255, 0, 255, 1); }
+        }
+
+        .cultivation-realm {
+            position: absolute;
+            bottom: 200px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 3;
+            font-size: 28px;
+            color: #ff00ff;
+            text-shadow: 0 0 20px rgba(255, 0, 255, 0.8);
+            font-weight: bold;
+        }
+
+        #spiritBar {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 3;
+            width: 80%;
+            max-width: 300px;
+            height: 25px;
+            background: rgba(0, 0, 0, 0.6);
+            border: 2px solid #00ffff;
+            border-radius: 15px;
+            overflow: hidden;
+        }
+
+        #spiritFill {
+            height: 100%;
+            background: linear-gradient(to right, #00ffff, #00ff00);
+            width: 0%;
+            transition: width 0.3s;
+            box-shadow: 0 0 10px rgba(0, 255, 255, 0.8);
+        }
+
+        #spiritText {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #fff;
+            font-weight: bold;
+            font-size: 12px;
+            text-shadow: 0 0 5px rgba(0, 0, 0, 1);
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <canvas id="gameCanvas"></canvas>
+        <canvas id="particleCanvas"></canvas>
+        
+        <div id="cultivationInfo" class="ui-overlay">
+            <h2>🧘 修仙系统</h2>
+            <div class="stat">
+                <span class="stat-label">境界：</span>
+                <span class="stat-value" id="realm">炼气期 Lv.1</span>
+            </div>
+            <div class="stat">
+                <span class="stat-label">灵力：</span>
+                <span class="stat-value" id="spirit">0 / 100</span>
+            </div>
+            <div class="stat">
+                <span class="stat-label">修为：</span>
+                <span class="stat-value" id="cultivation">0</span>
+            </div>
+            <div class="stat">
+                <span class="stat-label">吐纳次数：</span>
+                <span class="stat-value" id="tuNaCount">0</span>
+            </div>
+        </div>
+
+        <div id="spiritBar">
+            <div id="spiritFill"></div>
+            <div id="spiritText">灵力: 0%</div>
+        </div>
+
+        <div class="cultivation-realm" id="realmDisplay">炼气期</div>
+
+        <button id="tuNaButton">吐纳</button>
+
+        <div id="messageLog"></div>
+    </div>
+
+    <script>
+        // 获取Canvas和Context
+        const gameCanvas = document.getElementById('gameCanvas');
+        const gameCtx = gameCanvas.getContext('2d');
+        const particleCanvas = document.getElementById('particleCanvas');
+        const particleCtx = particleCanvas.getContext('2d');
+        
+        // 设置Canvas尺寸为窗口大小
+        function resizeCanvas() {
+            gameCanvas.width = window.innerWidth;
+            gameCanvas.height = window.innerHeight;
+            particleCanvas.width = window.innerWidth;
+            particleCanvas.height = window.innerHeight;
+        }
+        
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+
+        // 游戏状态
+        const gameState = {
+            realm: '炼气期',
+            realmLevel: 1,
+            spirit: 0,
+            maxSpirit: 100,
+            cultivation: 0,
+            tuNaCount: 0,
+            isCultivating: false,
+            cultivationSpeed: 1,
+            realms: [
+                '炼气期', '筑基期', '金丹期', '元婴期', '化神期',
+                '炼虚期', '合体期', '大乘期', '渡劫期', '仙人'
+            ]
+        };
+
+        // 粒子系统
+        class Particle {
+            constructor(x, y, type = 'spirit') {
+                this.x = x;
+                this.y = y;
+                this.type = type;
+                this.isOrbit = false;
+                
+                if (type === 'spirit') {
+                    this.vx = (Math.random() - 0.5) * 2;
+                    this.vy = -Math.random() * 3 - 1;
+                    this.life = 1.0;
+                    this.decay = 0.02;
+                    this.size = Math.random() * 4 + 2;
+                    this.color = `hsl(${Math.random() * 60 + 180}, 100%, 70%)`;
+                } else if (type === 'cultivation') {
+                    this.vx = (Math.random() - 0.5) * 3;
+                    this.vy = -Math.random() * 4 - 2;
+                    this.life = 1.0;
+                    this.decay = 0.015;
+                    this.size = Math.random() * 6 + 3;
+                    this.color = `hsl(${Math.random() * 60 + 300}, 100%, 70%)`;
+                }
+            }
+
+            update() {
+                if (this.isOrbit) {
+                    this.orbitAngle += this.orbitSpeed;
+                    this.x = cultivator.x + Math.cos(this.orbitAngle) * this.orbitRadius;
+                    this.y = cultivator.y + Math.sin(this.orbitAngle) * this.orbitRadius;
+                } else {
+                    this.x += this.vx;
+                    this.y += this.vy;
+                    this.vy += 0.05;
+                }
+                
+                this.life -= this.decay;
+                
+                return this.life > 0;
+            }
+
+            draw(ctx) {
+                ctx.save();
+                ctx.globalAlpha = this.life;
+                ctx.fillStyle = this.color;
+                ctx.shadowBlur = 15;
+                ctx.shadowColor = this.color;
+                
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.restore();
+            }
+        }
+
+        let particles = [];
+
+        // 背景星星
+        class Star {
+            constructor(canvasWidth, canvasHeight) {
+                this.x = Math.random() * canvasWidth;
+                this.y = Math.random() * canvasHeight * 0.7;
+                this.size = Math.random() * 2;
+                this.brightness = Math.random();
+                this.twinkleSpeed = Math.random() * 0.02 + 0.01;
+            }
+
+            update() {
+                this.brightness += this.twinkleSpeed;
+            }
+
+            draw(ctx) {
+                const alpha = (Math.sin(this.brightness) + 1) / 2 * 0.8 + 0.2;
+                ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        let stars = [];
+        
+        function initStars() {
+            stars = [];
+            for (let i = 0; i < 100; i++) {
+                stars.push(new Star(gameCanvas.width, gameCanvas.height));
+            }
+        }
+        
+        initStars();
+        window.addEventListener('resize', initStars);
+
+        // 修仙者角色
+        class Cultivator {
+            constructor() {
+                this.x = gameCanvas.width / 2;
+                this.y = gameCanvas.height * 0.5;
+                this.size = Math.min(gameCanvas.width, gameCanvas.height) * 0.15;
+                this.glowIntensity = 0;
+                this.auraRotation = 0;
+                this.image = null;
+                this.imageLoaded = false;
+                
+                this.loadImage('a02c1b570e987e3bb068c9728c53844e_720.jpg');
+            }
+
+            loadImage(src) {
+                this.image = new Image();
+                this.image.crossOrigin = 'anonymous';
+                this.image.onload = () => {
+                    this.imageLoaded = true;
+                    console.log('角色图片加载成功！', src);
+                };
+                this.image.onerror = (e) => {
+                    console.error('角色图片加载失败:', src, e);
+                    this.imageLoaded = false;
+                };
+                this.image.src = src;
+            }
+
+            update(cultivating) {
+                // 更新位置（适配屏幕）
+                this.x = gameCanvas.width / 2;
+                this.y = gameCanvas.height * 0.45;
+                this.size = Math.min(gameCanvas.width, gameCanvas.height) * 0.15;
+                
+                if (cultivating) {
+                    this.glowIntensity = Math.min(this.glowIntensity + 0.05, 1);
+                } else {
+                    this.glowIntensity = Math.max(this.glowIntensity - 0.02, 0);
+                }
+                this.auraRotation += 0.02;
+            }
+
+            draw(ctx) {
+                ctx.save();
+                
+                if (this.glowIntensity > 0) {
+                    ctx.strokeStyle = `rgba(0, 255, 255, ${this.glowIntensity * 0.6})`;
+                    ctx.lineWidth = 3;
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, this.size + 30 + Math.sin(this.auraRotation) * 8, 0, Math.PI * 2);
+                    ctx.stroke();
+                    
+                    for (let i = 0; i < 3; i++) {
+                        const angle = this.auraRotation + (i * Math.PI * 2 / 3);
+                        ctx.strokeStyle = `rgba(0, 255, 255, ${this.glowIntensity * 0.4})`;
+                        ctx.lineWidth = 2;
+                        ctx.beginPath();
+                        ctx.arc(
+                            this.x + Math.cos(angle) * (this.size + 40),
+                            this.y + Math.sin(angle) * (this.size + 40),
+                            20, 0, Math.PI * 2
+                        );
+                        ctx.stroke();
+                    }
+                    
+                    ctx.shadowBlur = 30 * this.glowIntensity;
+                    ctx.shadowColor = 'cyan';
+                }
+                
+                if (this.imageLoaded && this.image) {
+                    const drawWidth = this.size * 2;
+                    const drawHeight = this.size * 2;
+                    const drawX = this.x - drawWidth / 2;
+                    const drawY = this.y - drawHeight / 2;
+                    
+                    ctx.drawImage(this.image, drawX, drawY, drawWidth, drawHeight);
+                } else {
+                    this.drawDefault(ctx);
+                }
+                
+                ctx.restore();
+            }
+
+            drawDefault(ctx) {
+                ctx.fillStyle = '#4a90e2';
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size / 2, 0, Math.PI * 2);
+                ctx.fill();
+                
+                if (this.glowIntensity > 0) {
+                    ctx.fillStyle = `rgba(0, 255, 255, ${this.glowIntensity * 0.3})`;
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, this.size / 2 + 10, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                
+                ctx.fillStyle = '#fff';
+                ctx.beginPath();
+                ctx.arc(this.x - 10, this.y - 5, 5, 0, Math.PI * 2);
+                ctx.arc(this.x + 10, this.y - 5, 5, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y + 5, 10, 0, Math.PI, false);
+                ctx.stroke();
+            }
+        }
+
+        const cultivator = new Cultivator();
+
+        // 绘制背景
+        function drawBackground() {
+            const gradient = gameCtx.createLinearGradient(0, 0, 0, gameCanvas.height);
+            gradient.addColorStop(0, '#0a0a2e');
+            gradient.addColorStop(0.5, '#1a1a4e');
+            gradient.addColorStop(1, '#0a0a2e');
+            gameCtx.fillStyle = gradient;
+            gameCtx.fillRect(0, 0, gameCanvas.width, gameCanvas.height);
+
+            stars.forEach(star => {
+                star.update();
+                star.draw(gameCtx);
+            });
+
+            // 绘制月亮
+            gameCtx.fillStyle = '#ffffcc';
+            gameCtx.shadowBlur = 30;
+            gameCtx.shadowColor = '#ffffcc';
+            gameCtx.beginPath();
+            gameCtx.arc(gameCanvas.width * 0.8, gameCanvas.height * 0.13, 40, 0, Math.PI * 2);
+            gameCtx.fill();
+            
+            gameCtx.fillStyle = '#0a0a2e';
+            gameCtx.beginPath();
+            gameCtx.arc(gameCanvas.width * 0.8 + 10, gameCanvas.height * 0.13 - 5, 35, 0, Math.PI * 2);
+            gameCtx.fill();
+            
+            gameCtx.shadowBlur = 0;
+
+            cultivator.update(gameState.isCultivating);
+            cultivator.draw(gameCtx);
+        }
+
+        // 生成粒子
+        function emitParticles() {
+            if (!gameState.isCultivating) return;
+
+            const centerX = cultivator.x;
+            const centerY = cultivator.y;
+
+            const time = Date.now() * 0.001;
+            for (let i = 0; i < 2; i++) {
+                const angle = time * 2 + (i * Math.PI);
+                const radius = cultivator.size + 30 + Math.sin(time * 3) * 10;
+                
+                const particle = new Particle(centerX, centerY, 'spirit');
+                particle.isOrbit = true;
+                particle.orbitAngle = angle;
+                particle.orbitRadius = radius;
+                particle.orbitSpeed = 0.02;
+                particle.life = 1.0;
+                particle.decay = 0.01;
+                particle.size = Math.random() * 3 + 2;
+                particles.push(particle);
+            }
+
+            if (Math.random() < 0.3) {
+                const angle = Math.random() * Math.PI * 2;
+                const distance = 200 + Math.random() * 100;
+                
+                const particle = new Particle(
+                    centerX + Math.cos(angle) * distance,
+                    centerY + Math.sin(angle) * distance,
+                    'spirit'
+                );
+                particle.vx = (centerX - particle.x) * 0.01;
+                particle.vy = (centerY - particle.y) * 0.01;
+                particles.push(particle);
+            }
+
+            for (let i = 0; i < 1; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const distance = Math.random() * cultivator.size;
+                particles.push(new Particle(
+                    centerX + Math.cos(angle) * distance,
+                    centerY + Math.sin(angle) * distance,
+                    'cultivation'
+                ));
+            }
+        }
+
+        // 更新和绘制粒子
+        function updateParticles() {
+            particleCtx.clearRect(0, 0, particleCanvas.width, particleCanvas.height);
+            
+            particles = particles.filter(particle => {
+                const alive = particle.update();
+                if (alive) {
+                    particle.draw(particleCtx);
+                }
+                return alive;
+            });
+        }
+
+        // 游戏循环
+        function gameLoop() {
+            drawBackground();
+            emitParticles();
+            updateParticles();
+            requestAnimationFrame(gameLoop);
+        }
+
+        gameLoop();
+
+        // UI 更新
+        function updateUI() {
+            document.getElementById('realm').textContent = 
+                `${gameState.realm} Lv.${gameState.realmLevel}`;
+            document.getElementById('spirit').textContent = 
+                `${Math.floor(gameState.spirit)} / ${gameState.maxSpirit}`;
+            document.getElementById('cultivation').textContent = 
+                Math.floor(gameState.cultivation);
+            document.getElementById('tuNaCount').textContent = 
+                gameState.tuNaCount;
+            
+            const spiritPercent = (gameState.spirit / gameState.maxSpirit) * 100;
+            document.getElementById('spiritFill').style.width = `${spiritPercent}%`;
+            document.getElementById('spiritText').textContent = 
+                `灵力: ${Math.floor(spiritPercent)}%`;
+            
+            document.getElementById('realmDisplay').textContent = gameState.realm;
+        }
+
+        // 添加消息
+        function addMessage(text, type = 'info') {
+            const messageLog = document.getElementById('messageLog');
+            const message = document.createElement('div');
+            message.className = `message ${type}`;
+            message.textContent = text;
+            messageLog.appendChild(message);
+            
+            while (messageLog.children.length > 10) {
+                messageLog.removeChild(messageLog.firstChild);
+            }
+            
+            messageLog.scrollTop = messageLog.scrollHeight;
+        }
+
+        // 检查突破
+        function checkBreakthrough() {
+            const currentRealmIndex = gameState.realms.indexOf(gameState.realm);
+            
+            if (gameState.cultivation >= (currentRealmIndex + 1) * 100) {
+                if (currentRealmIndex < gameState.realms.length - 1) {
+                    gameState.realm = gameState.realms[currentRealmIndex + 1];
+                    gameState.realmLevel++;
+                    gameState.maxSpirit += 50;
+                    gameState.spirit = 0;
+                    gameState.cultivationSpeed += 0.5;
+                    
+                    addMessage(`🌟 突破成功！达到${gameState.realm}！`, 'breakthrough');
+                    addMessage(`灵力上限提升至 ${gameState.maxSpirit}！`, 'success');
+                    
+                    for (let i = 0; i < 50; i++) {
+                        setTimeout(() => {
+                            particles.push(new Particle(
+                                gameCanvas.width / 2 + (Math.random() - 0.5) * 200,
+                                gameCanvas.height * 0.5 + (Math.random() - 0.5) * 200,
+                                'cultivation'
+                            ));
+                        }, i * 20);
+                    }
+                }
+            }
+        }
+
+        // 吐纳功能（支持触摸和鼠标）
+        let cultivateInterval = null;
+        let cultivateTimer = null;
+        let cultivateTime = 0;
+        const MAX_CULTIVATE_TIME = 3000;
+
+        function startCultivating() {
+            if (gameState.isCultivating) return;
+            
+            gameState.isCultivating = true;
+            document.getElementById('tuNaButton').classList.add('cultivating');
+            cultivateTime = 0;
+            
+            addMessage('🧘 开始吐纳修炼...', 'info');
+            
+            cultivateInterval = setInterval(() => {
+                gameState.spirit += gameState.cultivationSpeed;
+                gameState.cultivation += 0.5;
+                gameState.tuNaCount++;
+                cultivateTime += 100;
+                
+                const remaining = Math.ceil((MAX_CULTIVATE_TIME - cultivateTime) / 1000);
+                document.getElementById('tuNaButton').textContent = `修炼中...${remaining}s`;
+                
+                updateUI();
+                checkBreakthrough();
+                
+                if (cultivateTime >= MAX_CULTIVATE_TIME) {
+                    stopCultivating();
+                    addMessage('⏰ 吐纳时间已达3秒，停止修炼', 'info');
+                }
+                
+                if (gameState.spirit >= gameState.maxSpirit) {
+                    gameState.spirit = gameState.maxSpirit;
+                    stopCultivating();
+                    addMessage('✨ 灵力已满，停止吐纳', 'success');
+                }
+            }, 100);
+        }
+
+        function stopCultivating() {
+            gameState.isCultivating = false;
+            clearInterval(cultivateInterval);
+            document.getElementById('tuNaButton').classList.remove('cultivating');
+            document.getElementById('tuNaButton').textContent = '吐纳';
+            addMessage(`⏸️ 停止吐纳（修炼时长：${cultivateTime / 1000}秒）`, 'info');
+        }
+
+        // 鼠标事件
+        document.getElementById('tuNaButton').addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            startCultivating();
+        });
+
+        document.getElementById('tuNaButton').addEventListener('mouseup', () => {
+            if (gameState.isCultivating) {
+                stopCultivating();
+            }
+        });
+
+        document.getElementById('tuNaButton').addEventListener('mouseleave', () => {
+            if (gameState.isCultivating) {
+                stopCultivating();
+            }
+        });
+
+        // 触摸事件（移动端）
+        document.getElementById('tuNaButton').addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            startCultivating();
+        });
+
+        document.getElementById('tuNaButton').addEventListener('touchend', (e) => {
+            e.preventDefault();
+            if (gameState.isCultivating) {
+                stopCultivating();
+            }
+        });
+
+        document.getElementById('tuNaButton').addEventListener('touchcancel', (e) => {
+            e.preventDefault();
+            if (gameState.isCultivating) {
+                stopCultivating();
+            }
+        });
+
+        // 初始化UI
+        updateUI();
+        addMessage('🎮 欢迎进入修仙世界！', 'success');
+        addMessage('💡 按住"吐纳"按钮开始修炼', 'info');
+    </script>
+</body>
+</html>
